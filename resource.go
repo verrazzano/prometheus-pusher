@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -19,6 +21,12 @@ type resources struct {
 	exit   chan struct{}
 	rs     map[string]*resource
 }
+
+var (
+	defaultHTTPClientTimeout     = 30 * time.Second
+)
+
+const envCaCertFile = "PROM_CERT";
 
 func createResources(cfg *pusherConfig, grm *routeMap) *resources {
 	rs := make(map[string]*resource)
@@ -94,9 +102,7 @@ func newResource(name string, cfg *pusherConfig, grm *routeMap) *resource {
 		pushGatewayURL: pushgatewayURL,
 		resURL:         cfg.resources[name].resURL,
 		routes:         rm,
-		httpClient: &http.Client{
-			Timeout: httpClientTimeout,
-		},
+		httpClient: 	getHttpClient(),
 	}
 }
 
@@ -174,4 +180,59 @@ func (r *resource) getAndPush(wgImux *sync.WaitGroup) {
 			go r.pushMetrics(body, dst, wgPush)
 		}
 	}
+}
+
+// Get client used to call keycloak
+func getHttpClient() *http.Client {
+	// Get the cert
+	caData := getCACert()
+	if caData == nil || len(caData) == 0 {
+		logger.Debug("Using HTTP client wihout cert ")
+		return &http.Client{ Timeout: defaultHTTPClientTimeout}
+	}
+
+	logger.Debug("Using cert with HTTP client ")
+
+	// Create Transport object
+	tr := &http.Transport{
+		TLSClientConfig:       &tls.Config{RootCAs: rootCertPool(caData)},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	client :=  &http.Client{Transport: tr, Timeout: defaultHTTPClientTimeout}
+	return client
+}
+
+// get the ca.crt from secret "<vz-env-name>-secret" in namespace "verrazzano-system"
+func getCACert() []byte {
+
+	fName := os.Getenv(envCaCertFile)
+
+	if len(fName) == 0 {
+		return nil
+	}
+	f, err := os.Open(fName)
+	if err != nil {
+		logger.Error("Unable to open cert file " + fName)
+		return nil
+	}
+	defer f.Close()
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		logger.Error("Error reading the cert file " + fName)
+		return nil
+	}
+	return b
+}
+
+func rootCertPool(caData []byte) *x509.CertPool {
+	if len(caData) == 0 {
+		return nil
+	}
+	// if we have caData, use it
+	certPool := x509.NewCertPool()
+	certPool.AppendCertsFromPEM(caData)
+	return certPool
 }
