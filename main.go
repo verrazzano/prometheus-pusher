@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
-	fqdn "github.com/Showmax/go-fqdn"
-	"github.com/Showmax/sockrus"
-	"github.com/sirupsen/logrus"
+	fqdn "github.com/ShowMax/go-fqdn"
+	"github.com/ShowMax/sockrus"
+	"github.com/Sirupsen/logrus"
 )
 
 // global vars
@@ -28,10 +27,9 @@ var (
 	serviceName       = "prometheus-pusher"
 	version           string
 	versionFlag       bool
-	printMutex        = &sync.Mutex{}
 )
 
-func init() {
+func init_unused() {
 	// parse arguments
 	flag.StringVar(&cfgPath, "config", defaultConfPath,
 		"Config file or directory. If directory is specified then all "+
@@ -70,7 +68,8 @@ func init() {
 	})
 }
 
-func main() {
+// See prometheus-pusher.go for the real main
+func main_unused() {
 	logger.Info("Starting prometheus-pusher")
 
 	// read config files
@@ -104,12 +103,12 @@ func main() {
 		}
 	}()
 
-	resources.process(pusherCfg)
+	resources.process()
 
 	for {
 		select {
 		case <-resources.run():
-			resources.process(pusherCfg)
+			resources.process()
 		case <-resources.stop():
 			logger.Info("Resources processing stopped")
 			os.Exit(0)
