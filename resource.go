@@ -4,14 +4,19 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/ShowMax/go-fqdn"
+
 )
 
 type resources struct {
@@ -22,13 +27,9 @@ type resources struct {
 	rs     map[string]*resource
 }
 
-var (
-	defaultHTTPClientTimeout     = 30 * time.Second
-)
-
-const envCaCertFile = "PROM_CERT";
-
 func createResources(cfg *pusherConfig, grm *routeMap) *resources {
+	init()
+
 	rs := make(map[string]*resource)
 
 	for name := range cfg.resources {
@@ -208,7 +209,7 @@ func getHttpClient() *http.Client {
 // get the ca.crt from secret "<vz-env-name>-secret" in namespace "verrazzano-system"
 func getCACert() []byte {
 
-	fName := os.Getenv(envCaCertFile)
+	fName := caCertFile
 
 	if len(fName) == 0 {
 		return nil
@@ -235,4 +236,47 @@ func rootCertPool(caData []byte) *x509.CertPool {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(caData)
 	return certPool
+}
+
+func init() {
+
+	dummy := flag.Bool("dummy", false,
+		"Do not post the metrics, just print them to stdout")
+	flag.Parse()
+
+	log.SetOutput(os.Stdout)
+
+	instanceLabel := getInstanceName()
+
+	labels := getEnvVarsWithPrefix("log_field_", os.Environ())
+
+	log.Infoln("instanceLabel=" + instanceLabel)
+	log.Infoln("PushGateway=" + pusher.PushGatewayURL)
+	log.Infoln("Push Interval=" + pusher.PushInterval.String())
+	log.Infoln("Metric:")
+	for _, metric := range pusher.Metrics {
+		log.Infof("  Name=%s URL:%s", metric.Name, metric.URL)
+	}
+	log.Infoln("Labels:")
+	for _, label := range labels {
+		log.Infoln("  " + label)
+	}
+
+	log.Infoln("Starting threads to scrape metrics, then push them to the gateway")
+
+	for _, metric := range pusher.Metrics {
+		go getAndPush(metric, pusher.PushGatewayURL, instanceLabel, dummy, labels)
+	}
+	for _ = range time.Tick(pusher.PushInterval) {
+		for _, metric := range pusher.Metrics {
+			go getAndPush(metric, pusher.PushGatewayURL, instanceLabel, dummy, labels)
+		}
+	}
+}
+
+func getInstanceName() string {
+	if len(os.Getenv("INSTANCE_NAME")) > 0 {
+		return os.Getenv("INSTANCE_NAME")
+	}
+	return fqdn.Get()
 }

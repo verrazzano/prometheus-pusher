@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +34,7 @@ func concatConfigFiles(path string) ([]byte, error) {
 				fileName := path + "/" + file.Name()
 				data, err2 := ioutil.ReadFile(fileName)
 				if err2 != nil {
-					logger.Errorf("Failed to read config file %s - %s", fileName, err2.Error())
+					logger.Error("Failed to read config file %s - %s", fileName, err2.Error())
 					continue
 				}
 				config = append(config, data...)
@@ -71,6 +72,14 @@ type pusherConfig struct {
 	pushInterval   time.Duration
 	routeMap       string
 	resources      map[string]*resourceConfig
+
+	// Verrazzano config
+	splitSize                int
+	defaultHTTPClientTimeout time.Duration
+	pushGatewayUser          string
+	pushGatewayPassword      string
+	pushGatewayPasswordFile  string
+	caCertFile               string
 }
 
 // parses []byte with TOML config data into pusherConfig
@@ -78,9 +87,17 @@ type pusherConfig struct {
 //
 func parseConfig(data []byte) (*pusherConfig, error) {
 	p := &pusherConfig{
-		pushInterval: time.Duration(60) * time.Second,
-		resources:    make(map[string]*resourceConfig),
+		pushInterval:             time.Duration(60) * time.Second,
+		resources:                make(map[string]*resourceConfig),
+		splitSize:                1000,
+		defaultHTTPClientTimeout: 30 * time.Second,
+		pushGatewayUser:          os.Getenv("PUSHGATEWAY_USER"),
+		pushGatewayPassword:      os.Getenv("PUSHGATEWAY_PASSWORD"),
+		pushGatewayPasswordFile:  os.Getenv("PUSHGATEWAY_PASSWORD_FILE"),
+		caCertFile: 			  os.Getenv("PROM_CERT"),
 	}
+
+	procEnv(p)
 
 	rd := bytes.NewReader(data)
 	t, err := toml.LoadReader(rd)
@@ -165,4 +182,28 @@ func parseConfig(data []byte) (*pusherConfig, error) {
 	}
 
 	return p, nil
+}
+
+// Process environment overrides and update config
+func procEnv(config *pusherConfig) {
+	// Override push interval if it is defined
+	pushIntervalSecs := os.Getenv("PUSH_INTERVAL")
+	if (len(pushIntervalSecs) > 0) {
+		val, err := strconv.Atoi(pushIntervalSecs)
+		if err != nil {
+			logger.Warning("Error parsing pushInterval as an integer. Defaulting to 60 seconds")
+		} else {
+			config.pushInterval = time.Second * time.Duration(val)
+		}
+	}
+
+	s := os.Getenv("SPLIT_SIZE")
+	if len(s) > 0 {
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			logger.Errorf("could not parse split size: %s", err)
+			return
+		}
+		config.splitSize = int(i)
+	}
 }

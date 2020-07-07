@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	fqdn "github.com/ShowMax/go-fqdn"
-	"github.com/ShowMax/sockrus"
-	"github.com/Sirupsen/logrus"
+	fqdn "github.com/Showmax/go-fqdn"
+	"github.com/Showmax/sockrus"
+	"github.com/sirupsen/logrus"
 )
 
 // global vars
@@ -27,6 +28,7 @@ var (
 	serviceName       = "prometheus-pusher"
 	version           string
 	versionFlag       bool
+	printMutex        = &sync.Mutex{}
 )
 
 func init() {
@@ -102,12 +104,12 @@ func main() {
 		}
 	}()
 
-	resources.process()
+	resources.process(pusherCfg)
 
 	for {
 		select {
 		case <-resources.run():
-			resources.process()
+			resources.process(pusherCfg)
 		case <-resources.stop():
 			logger.Info("Resources processing stopped")
 			os.Exit(0)
